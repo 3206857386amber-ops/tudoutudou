@@ -118,6 +118,30 @@
             -webkit-touch-callout: none;
         }
 
+        /* 触屏上不要用 transform 位移，否则手指抬起时点不中按钮 */
+        @media (hover: none) {
+            button:hover,
+            .card:hover,
+            .hub-card:hover,
+            .mode-card:hover,
+            .word-item:hover,
+            .scene-btn:hover,
+            .scene-dropdown-btn:hover,
+            .wrong-entry-sm:hover {
+                transform: none !important;
+            }
+            button:active,
+            .card:active,
+            .hub-card:active,
+            .mode-card:active,
+            .word-item:active,
+            .scene-btn:active,
+            .scene-dropdown-btn:active,
+            .wrong-entry-sm:active {
+                transform: none !important;
+            }
+        }
+
         /* ===== 视图 ===== */
         .view {
             display: none;
@@ -1152,6 +1176,7 @@
             align-items: center;
             text-transform: uppercase;
             letter-spacing: 0.04em;
+            flex-shrink: 0;
         }
         .modal-box .modal-title .close-btn {
             border: 4px solid #1a1a1a;
@@ -1196,9 +1221,17 @@
             font-size: 0.85rem;
             color: #1a1a1a;
             cursor: pointer;
-            transition: all 0.15s ease;
+            transition: background 0.15s ease, box-shadow 0.15s ease;
             font-weight: 700;
             box-shadow: 3px 3px 0 #1a1a1a;
+            appearance: none;
+            -webkit-appearance: none;
+            width: 100%;
+            text-align: left;
+            font-family: inherit;
+        }
+        .modal-box .vocab-list .word-item.speaking {
+            background: #ffe66d;
         }
         .modal-box .vocab-list .word-item:hover {
             background: #ffe66d;
@@ -1233,6 +1266,7 @@
             border-top: 4px solid #1a1a1a;
             padding-top: 14px;
             margin-top: 4px;
+            flex-shrink: 0;
         }
         .modal-box .vocab-actions button {
             border: 4px solid #1a1a1a;
@@ -1272,6 +1306,7 @@
             border-top: 4px solid #1a1a1a;
             padding-top: 14px;
             text-align: right;
+            flex-shrink: 0;
         }
         .modal-box .start-row button {
             border: 4px solid #1a1a1a;
@@ -1899,7 +1934,7 @@
         <!-- ============================================================ -->
         <div class="view" id="viewListening">
             <div class="listening-header">
-                <button class="back-btn" id="listeningBackBtn">← 返回</button>
+                <button type="button" class="back-btn" id="listeningBackBtn">← 返回</button>
                 <div class="scene-dropdown" id="sceneDropdown">
                     <button class="scene-dropdown-btn" id="sceneDropdownBtn" type="button">🏠 日常 ▾</button>
                     <div class="scene-dropdown-menu" id="sceneDropdownMenu"></div>
@@ -1916,7 +1951,7 @@
         <!-- ============================================================ -->
         <div class="view" id="viewDetail">
             <div class="detail-header">
-                <button class="back-btn" id="detailBackBtn">← 返回</button>
+                <button type="button" class="back-btn" id="detailBackBtn">← 返回</button>
                 <span class="detail-title" id="detailTitle">jour01</span>
                 <span class="detail-sub" id="detailSub">0 句 · 0 题</span>
             </div>
@@ -6227,42 +6262,9 @@ const SCENE_STORAGE_KEY = 'french_last_scene_v1';
 
         function bindTapClick(el, handler) {
             if (!el) return;
-            let touchStartX = 0;
-            let touchStartY = 0;
-            let touchMoved = false;
-            let lastTouchEnd = 0;
-
-            el.addEventListener('touchstart', function(e) {
-                touchMoved = false;
-                const touch = e.changedTouches[0];
-                if (touch) {
-                    touchStartX = touch.clientX;
-                    touchStartY = touch.clientY;
-                }
-            }, { passive: true });
-
-            el.addEventListener('touchmove', function(e) {
-                const touch = e.changedTouches[0];
-                if (!touch) return;
-                if (Math.abs(touch.clientX - touchStartX) > 10 || Math.abs(touch.clientY - touchStartY) > 10) {
-                    touchMoved = true;
-                }
-            }, { passive: true });
-
-            el.addEventListener('touchend', function(e) {
-                if (touchMoved) return;
-                lastTouchEnd = Date.now();
-                e.stopPropagation();
-                handler.call(this, e);
-            }, { passive: true });
-
             el.addEventListener('click', function(e) {
-                if (Date.now() - lastTouchEnd < 400) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    return;
-                }
                 e.stopPropagation();
+                unlockTTS();
                 handler.call(this, e);
             });
         }
@@ -6274,43 +6276,86 @@ const SCENE_STORAGE_KEY = 'french_last_scene_v1';
         let ttsSpeaking = false;
         let isReadingAll = false;
         let cachedVoices = [];
+        let ttsUnlocked = false;
+        let ttsWarned = false;
 
         function loadVoices() {
             if (!window.speechSynthesis) return;
-            const voices = window.speechSynthesis.getVoices();
-            if (voices.length > 0) cachedVoices = voices;
+            try {
+                const voices = window.speechSynthesis.getVoices();
+                if (voices && voices.length > 0) cachedVoices = voices;
+            } catch (_) {}
+        }
+
+        function unlockTTS() {
+            if (ttsUnlocked || !window.speechSynthesis) return;
+            ttsUnlocked = true;
+            try {
+                const warm = new SpeechSynthesisUtterance(' ');
+                warm.volume = 0;
+                warm.rate = 2;
+                window.speechSynthesis.speak(warm);
+                window.speechSynthesis.cancel();
+            } catch (_) {}
+            loadVoices();
         }
 
         function speakText(text, callback) {
-            if (!window.speechSynthesis) { if (callback) callback(); return; }
+            if (!window.speechSynthesis) {
+                if (!ttsWarned) {
+                    ttsWarned = true;
+                    alert('当前浏览器不支持朗读。请用 Chrome 打开，并在系统设置里安装法语语音包。');
+                }
+                if (callback) callback();
+                return;
+            }
+            unlockTTS();
             loadVoices();
-            if (window.speechSynthesis.paused) window.speechSynthesis.resume();
-            window.speechSynthesis.cancel();
-            const utterance = new SpeechSynthesisUtterance(text);
+            try {
+                if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+            } catch (_) {}
+
+            const utterance = new SpeechSynthesisUtterance(String(text));
             utterance.lang = 'fr-FR';
             utterance.rate = 0.85;
             utterance.pitch = 1.0;
-            const voices = cachedVoices.length ? cachedVoices : window.speechSynthesis.getVoices();
-            const fr = voices.find(v => v.lang.startsWith('fr'));
+            const voices = cachedVoices.length ? cachedVoices : [];
+            const fr = voices.find(v => (v.lang || '').toLowerCase().startsWith('fr'));
             if (fr) utterance.voice = fr;
+
             ttsSpeaking = true;
-            utterance.onend = function() { ttsSpeaking = false;
-                if (callback) callback(); };
-            utterance.onerror = function() { ttsSpeaking = false;
-                if (callback) callback(); };
-            window.speechSynthesis.speak(utterance);
-            setTimeout(function() {
-                if (!ttsSpeaking) return;
-                if (!window.speechSynthesis.speaking && !window.speechSynthesis.pending) {
+            utterance.onend = function() {
+                ttsSpeaking = false;
+                if (callback) callback();
+            };
+            utterance.onerror = function() {
+                ttsSpeaking = false;
+                if (callback) callback();
+            };
+
+            const startSpeak = function() {
+                try {
                     window.speechSynthesis.speak(utterance);
+                } catch (_) {
+                    ttsSpeaking = false;
+                    if (callback) callback();
                 }
-            }, 200);
+            };
+
+            // 安卓上 cancel() 后立刻 speak 会静音，需错开一拍；第一次点击则直接发音以保留用户手势
+            if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+                try { window.speechSynthesis.cancel(); } catch (_) {}
+                setTimeout(startSpeak, 80);
+            } else {
+                startSpeak();
+            }
             return utterance;
         }
 
         function cancelTTS() {
-            window.speechSynthesis.cancel();
             ttsSpeaking = false;
+            if (!window.speechSynthesis) return;
+            try { window.speechSynthesis.cancel(); } catch (_) {}
         }
 
         // ================================================================
@@ -6471,18 +6516,15 @@ const SCENE_STORAGE_KEY = 'french_last_scene_v1';
                 list.innerHTML = '<div style="color:#1a1a1a;padding:12px;font-weight:700;">暂无单词列表</div>';
             } else {
                 vocab.forEach((word, idx) => {
-                    const item = document.createElement('div');
+                    const item = document.createElement('button');
+                    item.type = 'button';
                     item.className = 'word-item';
+                    item.dataset.word = word;
                     item.innerHTML = `
                         <span class="index">${idx+1}</span>
                         <span class="word">${word}</span>
                         <span class="play-icon">▶</span>
                     `;
-                    bindTapClick(item, function() {
-                        cancelTTS();
-                        isReadingAll = false;
-                        speakText(word);
-                    });
                     list.appendChild(item);
                 });
             }
@@ -7706,8 +7748,24 @@ function renderChartGroup(containerId, data, groupName) {
             });
 
             // 单词浮层
-            bindTapClick(document.getElementById('vocabModalClose'), closeVocabModal);
-            bindTapClick(document.getElementById('vocabStartBtn'), closeVocabModal);
+            bindTapClick(document.getElementById('vocabModalClose'), function() {
+                closeVocabModal();
+            });
+            bindTapClick(document.getElementById('vocabStartBtn'), function() {
+                closeVocabModal();
+            });
+            document.getElementById('vocabList').addEventListener('click', function(e) {
+                const item = e.target.closest('.word-item');
+                if (!item || !this.contains(item)) return;
+                const word = item.dataset.word;
+                if (!word) return;
+                isReadingAll = false;
+                this.querySelectorAll('.word-item').forEach(el => el.classList.remove('speaking'));
+                item.classList.add('speaking');
+                speakText(word, function() {
+                    item.classList.remove('speaking');
+                });
+            });
             document.getElementById('vocabModal').addEventListener('click', function(e) {
                 if (e.target === this) closeVocabModal();
             });
@@ -7844,8 +7902,11 @@ function renderChartGroup(containerId, data, groupName) {
             updateWrongBadge();
             showView('home');
             bindEvents();
-            loadVoices();
-            window.speechSynthesis.onvoiceschanged = loadVoices;
+            if (window.speechSynthesis) {
+                loadVoices();
+                window.speechSynthesis.onvoiceschanged = loadVoices;
+            }
+            document.addEventListener('click', unlockTTS, { once: true });
         }
 
         if (document.readyState === 'loading') {
