@@ -6277,7 +6277,7 @@ const SCENE_STORAGE_KEY = 'french_last_scene_v1';
         let isReadingAll = false;
         let cachedVoices = [];
         let ttsUnlocked = false;
-        let ttsWarned = false;
+        let ttsAudio = null;
 
         function loadVoices() {
             if (!window.speechSynthesis) return;
@@ -6287,9 +6287,15 @@ const SCENE_STORAGE_KEY = 'french_last_scene_v1';
             } catch (_) {}
         }
 
+        function hasFrenchVoice() {
+            loadVoices();
+            return cachedVoices.some(v => (v.lang || '').toLowerCase().startsWith('fr'));
+        }
+
         function unlockTTS() {
-            if (ttsUnlocked || !window.speechSynthesis) return;
+            if (ttsUnlocked) return;
             ttsUnlocked = true;
+            if (!window.speechSynthesis) return;
             try {
                 const warm = new SpeechSynthesisUtterance(' ');
                 warm.volume = 0;
@@ -6300,12 +6306,57 @@ const SCENE_STORAGE_KEY = 'french_last_scene_v1';
             loadVoices();
         }
 
-        function speakText(text, callback) {
-            if (!window.speechSynthesis) {
-                if (!ttsWarned) {
-                    ttsWarned = true;
-                    alert('当前浏览器不支持朗读。请用 Chrome 打开，并在系统设置里安装法语语音包。');
+        function stopTtsAudio() {
+            if (!ttsAudio) return;
+            try {
+                ttsAudio.onended = null;
+                ttsAudio.onerror = null;
+                ttsAudio.pause();
+                ttsAudio.src = '';
+            } catch (_) {}
+            ttsAudio = null;
+        }
+
+        function speakOnlineFrench(text, callback) {
+            const chunks = [];
+            const raw = String(text).trim();
+            let rest = raw;
+            while (rest.length > 180) {
+                let cut = rest.lastIndexOf(' ', 180);
+                if (cut < 40) cut = 180;
+                chunks.push(rest.slice(0, cut));
+                rest = rest.slice(cut).trim();
+            }
+            if (rest) chunks.push(rest);
+            if (chunks.length === 0) chunks.push(raw);
+
+            let i = 0;
+            const playNext = function() {
+                if (i >= chunks.length) {
+                    ttsSpeaking = false;
+                    if (callback) callback();
+                    return;
                 }
+                const piece = chunks[i].trim();
+                i++;
+                if (!piece) { playNext(); return; }
+                stopTtsAudio();
+                const url = 'https://dict.youdao.com/dictvoice?le=fr&audio=' + encodeURIComponent(piece);
+                ttsAudio = new Audio(url);
+                ttsAudio.onended = playNext;
+                ttsAudio.onerror = function() {
+                    speakBrowserTTS(piece, playNext);
+                };
+                ttsSpeaking = true;
+                ttsAudio.play().catch(function() {
+                    speakBrowserTTS(piece, playNext);
+                });
+            };
+            playNext();
+        }
+
+        function speakBrowserTTS(text, callback) {
+            if (!window.speechSynthesis) {
                 if (callback) callback();
                 return;
             }
@@ -6319,8 +6370,7 @@ const SCENE_STORAGE_KEY = 'french_last_scene_v1';
             utterance.lang = 'fr-FR';
             utterance.rate = 0.85;
             utterance.pitch = 1.0;
-            const voices = cachedVoices.length ? cachedVoices : [];
-            const fr = voices.find(v => (v.lang || '').toLowerCase().startsWith('fr'));
+            const fr = cachedVoices.find(v => (v.lang || '').toLowerCase().startsWith('fr'));
             if (fr) utterance.voice = fr;
 
             ttsSpeaking = true;
@@ -6342,18 +6392,26 @@ const SCENE_STORAGE_KEY = 'french_last_scene_v1';
                 }
             };
 
-            // 安卓上 cancel() 后立刻 speak 会静音，需错开一拍；第一次点击则直接发音以保留用户手势
             if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
                 try { window.speechSynthesis.cancel(); } catch (_) {}
                 setTimeout(startSpeak, 80);
             } else {
                 startSpeak();
             }
-            return utterance;
+        }
+
+        function speakText(text, callback) {
+            stopTtsAudio();
+            if (window.speechSynthesis && hasFrenchVoice()) {
+                speakBrowserTTS(text, callback);
+            } else {
+                speakOnlineFrench(text, callback);
+            }
         }
 
         function cancelTTS() {
             ttsSpeaking = false;
+            stopTtsAudio();
             if (!window.speechSynthesis) return;
             try { window.speechSynthesis.cancel(); } catch (_) {}
         }
